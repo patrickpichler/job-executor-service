@@ -5,6 +5,7 @@
 package fake
 
 import (
+	io "io"
 	config "keptn-sandbox/job-executor-service/pkg/config"
 	k8sutils "keptn-sandbox/job-executor-service/pkg/k8sutils"
 	reflect "reflect"
@@ -105,4 +106,19 @@ func (m *MockK8s) GetLogsOfPod(jobName string) (string, error) {
 func (mr *MockK8sMockRecorder) GetLogsOfPod(jobName interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetLogsOfPod", reflect.TypeOf((*MockK8s)(nil).GetLogsOfPod), jobName)
+}
+
+// OpenLogs mocks base method.
+func (m *MockK8s) OpenLogs(jobName string) (io.ReadCloser, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OpenLogs", jobName)
+	ret0, _ := ret[0].(io.ReadCloser)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// OpenLogs indicates an expected call of OpenLogs.
+func (mr *MockK8sMockRecorder) OpenLogs(jobName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OpenLogs", reflect.TypeOf((*MockK8s)(nil).OpenLogs), jobName)
 }

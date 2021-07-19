@@ -1,13 +1,18 @@
 package eventhandler
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"keptn-sandbox/job-executor-service/pkg/config"
 	"keptn-sandbox/job-executor-service/pkg/k8sutils"
 	"log"
 	"math"
 	"strconv"
+	"sync"
+	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2" // make sure to use v2 cloudevents here
 	keptnv2 "github.com/keptn/go-utils/pkg/lib/v0_2_0"
@@ -141,7 +146,78 @@ func (eh *EventHandler) startK8sJob(k8s k8sutils.K8s, action *config.Action, jso
 		if task.MaxPollDuration != nil {
 			maxPollCount = int(math.Ceil(float64(*task.MaxPollDuration) / pollIntervalInSeconds))
 		}
+
+		doneChan := make(chan bool, 1)
+		var waitGroup sync.WaitGroup
+
+		reader, err := k8s.OpenLogs(jobName)
+
+		if err != nil {
+			log.Printf("Error while retrieving logs: %s\n", err)
+		} else {
+			log.Println("start log group")
+			defer reader.Close()
+			logSendTimer := time.NewTicker(1 * time.Second)
+
+			log.Println("inc wait group")
+			waitGroup.Add(1)
+
+			log.Println("start go routing")
+			go func(r io.ReadCloser, doneChan <-chan bool, tickerChan <-chan time.Time) {
+				const bufferSliceSize = 1024
+				lineBuffer := bytes.Buffer{}
+				byteSlice := make([]byte, bufferSliceSize)
+
+				defer waitGroup.Done()
+
+				for {
+					select {
+					case <-tickerChan:
+						log.Println("received ticker")
+						for {
+							// TODO handle EOF
+							n, err := r.Read(byteSlice)
+							log.Printf("Read %d bytes\n", n)
+
+							eof := errors.Is(err, io.EOF)
+
+							if err != nil && !eof {
+								log.Printf("Error while retrieving logs: %s\n", err.Error())
+								return
+							}
+
+							lineBuffer.Write(byteSlice[:n])
+
+							if eof || n != bufferSliceSize {
+								break
+							}
+						}
+
+						// TODO find last line
+						logLines := lineBuffer.String()
+						log.Println("==== result ====")
+						log.Println(logLines)
+						log.Println("==== result end ====")
+						lineBuffer.Reset()
+
+						sendTaskUpdateEvent(eh.Keptn, eh.ServiceName, logLines)
+
+					case <-doneChan:
+						log.Println("done")
+						return
+					}
+				}
+
+			}(reader, doneChan, logSendTimer.C)
+		}
+
+		log.Println("wait job done")
 		jobErr := k8s.AwaitK8sJobDone(jobName, maxPollCount, pollIntervalInSeconds)
+		log.Println("job done")
+		doneChan <- true
+		log.Println("wait group")
+		waitGroup.Wait()
+		log.Println("done wait group")
 
 		logs, err := k8s.GetLogsOfPod(jobName)
 		if err != nil {
@@ -180,6 +256,16 @@ func (eh *EventHandler) startK8sJob(k8s k8sutils.K8s, action *config.Action, jso
 			log.Printf("Error while sending finished event: %s\n", err.Error())
 			return
 		}
+	}
+}
+
+func sendTaskUpdateEvent(myKeptn *keptnv2.Keptn, serviceName string, logs string) {
+	_, err := myKeptn.SendTaskStatusChangedEvent(&keptnv2.EventData{
+		Message: logs,
+	}, serviceName)
+
+	if err != nil {
+		log.Printf("Error while sending started event: %s\n", err)
 	}
 }
 

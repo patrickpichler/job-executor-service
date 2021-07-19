@@ -175,6 +175,7 @@ func (k8s *k8sImpl) CreateK8sJob(jobName string, action *config.Action, task con
 }
 
 func (k8s *k8sImpl) AwaitK8sJobDone(jobName string, maxPollCount int, pollIntervalInSeconds int) error {
+	// TODO use watch?
 	jobs := k8s.clientset.BatchV1().Jobs(k8s.namespace)
 
 	currentPollCount := 0
